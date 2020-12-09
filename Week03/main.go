@@ -17,8 +17,10 @@ func main() {
 
 	eg := &errgroup.Group{}
 
-	// 启动一个监控线程
-	go monitor(stop)
+	// 起一个协程
+	eg.Go(func() error {
+		return monitor(stop)
+	})
 
 	// 另起一个协程
 	eg.Go(func() error {
@@ -48,7 +50,7 @@ func listen(addr string, handler http.Handler, stop <-chan struct{}) error {
 	return s.ListenAndServe()
 }
 
-func monitor(stop chan<- struct{}) {
+func monitor(stop chan struct{}) error {
 
 	// chan
 	ch := make(chan os.Signal)
@@ -60,8 +62,11 @@ func monitor(stop chan<- struct{}) {
 	select {
 	case <-ch:
 		stop <- struct{}{}
-		os.Exit(0)
+	case <-stop:
+		close(ch)
 	}
+
+	return nil
 }
 
 // 自定义handler
