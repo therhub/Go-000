@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"os"
 	"os/signal"
@@ -13,29 +14,34 @@ import (
 // 1. 基于 errgroup 实现一个 http server 的启动和关闭 ，以及 linux signal 信号的注册和处理，要保证能够一个退出，全部注销退出。
 func main() {
 
-	stop := make(chan struct{})
+	// 产生一个新的group
+	g, ctx := errgroup.WithContext(context.Background())
 
-	eg := &errgroup.Group{}
-
-	// 起一个协程
-	eg.Go(func() error {
-		return monitor(stop)
+	// 异步监控 linux signal
+	g.Go(func() error {
+		return monitor(ctx)
 	})
 
-	// 另起一个协程
-	eg.Go(func() error {
-		return listen(":8080", &selfHandler{}, stop)
+	// 启动http1
+	g.Go(func() error {
+		return listen(ctx, ":8080", &selfHandler{})
+	})
+
+	// 启动http2
+	g.Go(func() error {
+		return listen(ctx, ":8081", &selfHandler{})
 	})
 
 	// 等待如果发生错误关闭stop
-	if err := eg.Wait(); err != nil {
-		close(stop)
-		os.Exit(1)
+	if err := g.Wait(); err != nil {
+		print(err)
 	}
+
+	println(ctx.Err())
 }
 
-// 监听
-func listen(addr string, handler http.Handler, stop <-chan struct{}) error {
+// 服务器监听
+func listen(input context.Context, addr string, handler http.Handler) error {
 
 	s := &http.Server{
 		Addr:    addr,
@@ -43,14 +49,15 @@ func listen(addr string, handler http.Handler, stop <-chan struct{}) error {
 	}
 
 	go func() {
-		<-stop
-		s.Shutdown(context.Background())
+		<-input.Done()
+		s.Shutdown(input)
 	}()
 
 	return s.ListenAndServe()
 }
 
-func monitor(stop chan struct{}) error {
+// linux signal监控
+func monitor(ctx context.Context) error {
 
 	// chan
 	ch := make(chan os.Signal)
@@ -58,15 +65,17 @@ func monitor(stop chan struct{}) error {
 	// 通过ch监听syscall
 	signal.Notify(ch, syscall.SIGTERM, syscall.SIGINT)
 
+	// 新建一个context
+	ctx, cancel := context.WithCancel(ctx)
+
 	// 一般情况下堵塞
 	select {
 	case <-ch:
-		stop <- struct{}{}
-	case <-stop:
-		close(ch)
+		cancel()
+		return errors.New("systempause")
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-
-	return nil
 }
 
 // 自定义handler
