@@ -1,0 +1,18 @@
+﻿syntax="proto3";
+
+package Go000.wk04.api.v1;
+option go_package = "therhub.com/Go-000/wk04/api;v1";
+
+service LoginGrpcService{
+	rpc Login(User) returns (LoginResponse);
+}
+
+message User{
+	int64 Id=1;
+	string Name=2;
+	string Password=3;
+}
+
+message LoginResponse{
+	int32 Status=1;
+}
